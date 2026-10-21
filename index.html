@@ -51,6 +51,9 @@ td.r,th.r{text-align:right}
 .chips button{flex:0 0 auto;display:flex;align-items:center;gap:6px;border:1px solid var(--bd);background:#fff;border-radius:20px;padding:4px 12px 4px 4px;font-size:14px;color:var(--tx)}
 .chips button.on{background:var(--g);color:#fff;border-color:var(--g)}.chips .ic{padding:2px;background:#fff}
 .cat{display:flex;align-items:center;gap:8px}
+.row{flex-wrap:wrap}.nb{display:block;background:none;border:0;padding:3px 0 0;color:var(--or);font-size:12px;cursor:pointer;text-align:left}.nb.has{font-weight:600}
+.nt{color:var(--or);font-size:13px}.nbox{flex-basis:100%;display:flex;gap:6px}.nbox input{padding:8px;font-size:15px}
+.ex{display:grid;grid-template-columns:1fr 70px 96px;gap:6px;margin-top:8px}.ex input,.ex select{padding:9px}
 @media print{header,.tabs,.noprint,.bar{display:none!important}body{background:#fff}.card{break-inside:avoid;border-color:#999}main{padding:0}}
 </style>
 </head>
@@ -229,8 +232,9 @@ const fmtTime = t => new Date(t).toLocaleString('de-DE', {day:'2-digit', month:'
 const UNITS = ['kg','Stück','Kiste','Bund','Schale','Sack','Liter','Packung','Netz'];
 
 let user = null, profile = null, products = [], cart = {}, search = '', catSel = '';
-try { cart = JSON.parse(localStorage.getItem('vg_cart') || '{}'); } catch (e) { cart = {}; }
-const saveCart = () => { try { localStorage.setItem('vg_cart', JSON.stringify(cart)); } catch (e) {} };
+let notes = {}, extras = [];
+try { cart = JSON.parse(localStorage.getItem('vg_cart') || '{}'); notes = JSON.parse(localStorage.getItem('vg_notes') || '{}'); extras = JSON.parse(localStorage.getItem('vg_extras') || '[]'); } catch (e) { cart = {}; notes = {}; extras = []; }
+const saveCart = () => { try { localStorage.setItem('vg_cart', JSON.stringify(cart)); localStorage.setItem('vg_notes', JSON.stringify(notes)); localStorage.setItem('vg_extras', JSON.stringify(extras)); } catch (e) {} };
 
 /* ---------- Start ---------- */
 async function route() {
@@ -318,18 +322,38 @@ async function renderShop(tab = 'shop') {
     <input id="search" placeholder="🔍 Artikel suchen…" value="${h(search)}">
     <div class="chips" id="chips"></div>
     <div id="list"></div>
+    <div class="card" style="margin-top:16px"><h3>Artikel nicht gefunden?</h3>
+      <p class="muted" style="margin:0">Tragen Sie hier Wünsche ein, die nicht im Sortiment sind.</p>
+      <div class="ex"><input id="exn" placeholder="Artikel, z. B. Okra"><input id="exq" type="number" inputmode="decimal" min="0" step="any" placeholder="Menge">
+      <select id="exu">${UNITS.map(u => `<option>${u}</option>`).join('')}</select></div>
+      <div id="exerr"></div>
+      <button class="btn sec w" style="margin-top:8px" onclick="addExtra()">＋ Hinzufügen</button>
+      <div id="exlist" style="margin-top:8px"></div></div>
     <div class="bar"><div class="t" id="sum"></div><button class="btn" onclick="renderReview()">Weiter</button></div>`;
   $('#search').oninput = e => { search = e.target.value; drawList(); };
-  drawChips(); drawList();
+  drawChips(); drawList(); drawExtras();
 }
-function drawChips() {
-  const cats = [...new Set(products.map(p => p.category || 'Sonstiges'))];
-  if (catSel && !cats.includes(catSel)) catSel = '';
-  if (cats.length < 2) { $('#chips').innerHTML = ''; return; }
-  window._cats = cats;
-  const b = (i, label, ic, on) => `<button class="${on ? 'on' : ''}" onclick="catSel=${i < 0 ? "''" : '_cats[' + i + ']'};drawChips();drawList()">${ic}${h(label)}</button>`;
-  $('#chips').innerHTML = b(-1, 'Alle', icon({ name: 'kiste' }, 28), !catSel) +
-    cats.map((c, i) => b(i, c, icon(products.find(p => (p.category || 'Sonstiges') === c), 28), catSel === c)).join('');
+function drawExtras() {
+  if (!$('#exlist')) return;
+  $('#exlist').innerHTML = extras.map((x, i) => `<div class="row has">${icon({ name: x.name }, 40)}<div class="n">${h(x.name)}<small>${fmtQ(x.qty)} ${h(x.unit)}</small></div>
+    <button class="btn red sm" onclick="extras.splice(${i},1);saveCart();drawExtras();updateSum()">✕</button></div>`).join('');
+}
+function addExtra() {
+  const name = $('#exn').value.trim(), qty = parseFloat(String($('#exq').value).replace(',', '.'));
+  if (!name || !qty || qty <= 0) { $('#exerr').innerHTML = '<div class="msg err">Bitte Artikel und Menge eingeben.</div>'; return; }
+  $('#exerr').innerHTML = '';
+  extras.push({ name, qty, unit: $('#exu').value }); saveCart();
+  $('#exn').value = ''; $('#exq').value = ''; drawExtras(); updateSum();
+}
+let openNote = null;
+function toggleNote(id) {
+  openNote = openNote == id ? null : id; drawList();
+  const i = $('#ni'); if (i) { i.focus(); i.onkeydown = e => { if (e.key === 'Enter') saveNote(id); }; }
+}
+function saveNote(id) {
+  const v = ($('#ni')?.value || '').trim();
+  if (v) notes[id] = v; else delete notes[id];
+  openNote = null; saveCart(); drawList();
 }
 function drawList() {
   const s = search.trim().toLowerCase();
@@ -340,10 +364,12 @@ function drawList() {
     const c = p.category || 'Sonstiges';
     if (c !== last) { html += `<div class="cat">${h(c)}</div>`; last = c; }
     const q = cart[p.id] || '';
-    html += `<div class="row ${q ? 'has' : ''}" id="r${p.id}">${icon(p)}<div class="n">${h(p.name)}<small>${h(p.unit)}</small></div>
+    html += `<div class="row ${q ? 'has' : ''}" id="r${p.id}">${icon(p)}<div class="n">${h(p.name)}<small>${h(p.unit)}</small>
+      <button class="nb ${notes[p.id] ? 'has' : ''}" onclick="toggleNote(${p.id})">${notes[p.id] ? '✎ ' + h(notes[p.id]) : '+ Kommentar'}</button></div>
       <div class="qty"><button onclick="chg(${p.id},-1)">−</button>
       <input type="number" inputmode="decimal" min="0" step="any" value="${q}" onchange="setQ(${p.id},this.value)">
-      <button onclick="chg(${p.id},1)">+</button></div></div>`;
+      <button onclick="chg(${p.id},1)">+</button></div>
+      ${openNote == p.id ? `<div class="nbox"><input id="ni" placeholder="Kommentar, z. B. reif, groß…" value="${h(notes[p.id] || '')}"><button class="btn sm" onclick="saveNote(${p.id})">OK</button></div>` : ''}</div>`;
   }
   $('#list').innerHTML = html || '<p class="muted">Kein Artikel gefunden.</p>';
   updateSum();
@@ -358,14 +384,15 @@ function setQ(id, v) {
 }
 function chg(id, d) { setQ(id, Math.max(0, (cart[id] || 0) + d)); }
 function updateSum() {
-  const n = Object.keys(cart).length;
+  const n = Object.keys(cart).length + extras.length;
   if ($('#sum')) $('#sum').innerHTML = n ? `<b>${n}</b> Artikel ausgewählt` : '<span class="muted">Noch nichts ausgewählt</span>';
 }
 function renderReview() {
   const ids = Object.keys(cart);
-  if (!ids.length) return alert('Bitte zuerst Artikel auswählen.');
+  if (!ids.length && !extras.length) return alert('Bitte zuerst Artikel auswählen.');
   const rows = ids.map(id => { const p = products.find(x => x.id == id);
-    return `<tr><td><div class="flex">${icon(p, 34)}${h(p.name)}</div></td><td class="r">${fmtQ(cart[id])} ${h(p.unit)}</td></tr>`; }).join('');
+    return `<tr><td><div class="flex">${icon(p, 34)}<div>${h(p.name)}${notes[id] ? `<br><small style="color:var(--or)">${h(notes[id])}</small>` : ''}</div></div></td><td class="r">${fmtQ(cart[id])} ${h(p.unit)}</td></tr>`; }).join('') +
+    extras.map(x => `<tr><td><div class="flex">${icon({ name: x.name }, 34)}<div>${h(x.name)}<br><small style="color:var(--or)">nicht im Sortiment</small></div></div></td><td class="r">${fmtQ(x.qty)} ${h(x.unit)}</td></tr>`).join('');
   app().innerHTML = `<div class="card"><h2>Bestellung prüfen</h2>
     <table><tr><th>Artikel</th><th class="r">Menge</th></tr>${rows}</table>
     <label>Lieferdatum</label><input type="date" id="dd" value="${tomorrow()}">
@@ -377,9 +404,15 @@ function renderReview() {
 async function sendOrder() {
   const btn = $('#send'); btn.disabled = true; btn.textContent = 'Wird gesendet…';
   const items = Object.entries(cart).map(([id, q]) => ({ product_id: Number(id), qty: q }));
-  const { data, error } = await sb.rpc('place_order', { p_delivery_date: $('#dd').value || null, p_note: $('#note').value || null, p_items: items });
+  const lines = [];
+  const nl = Object.entries(notes).filter(([id]) => cart[id]).map(([id, t]) => `• ${products.find(p => p.id == id)?.name}: ${t}`);
+  if (nl.length) lines.push('Notizen zu Artikeln:', ...nl);
+  if (extras.length) lines.push((lines.length ? '\n' : '') + 'Zusätzlich (nicht im Sortiment):', ...extras.map(x => `• ${fmtQ(x.qty)} ${x.unit} ${x.name}`));
+  const userNote = $('#note').value.trim();
+  if (userNote) lines.push((lines.length ? '\n' : '') + userNote);
+  const { data, error } = await sb.rpc('place_order', { p_delivery_date: $('#dd').value || null, p_note: lines.join('\n') || null, p_items: items });
   if (error) { btn.disabled = false; btn.textContent = 'Bestellung abschicken'; $('#err').innerHTML = `<div class="msg err">${h(error.message)}</div>`; return; }
-  cart = {}; saveCart();
+  cart = {}; notes = {}; extras = []; saveCart();
   app().innerHTML = `<div class="card" style="text-align:center"><h2>✅ Danke!</h2>
     <p>Ihre Bestellung <b>Nr. ${data}</b> wurde gesendet.</p>
     <button class="btn" onclick="renderShop('mine')">Meine Bestellungen</button>
@@ -393,7 +426,7 @@ async function renderMyOrders(tabs) {
     <div class="flex" style="justify-content:space-between"><h3>Nr. ${o.id} – Lieferung ${fmtDate(o.delivery_date)}</h3><span class="pill ${o.status === 'neu' ? 'neu' : ''}">${h(o.status)}</span></div>
     <div class="muted">Gesendet ${fmtTime(o.created_at)}</div>
     <table>${o.order_items.map(i => `<tr><td>${h(i.product_name)}</td><td class="r">${fmtQ(i.quantity)} ${h(i.unit)}</td></tr>`).join('')}</table>
-    ${o.note ? `<p class="muted">Hinweis: ${h(o.note)}</p>` : ''}
+    ${o.note ? `<p class="muted" style="white-space:pre-line">Hinweis: ${h(o.note)}</p>` : ''}
     <button class="btn sec sm" style="margin-top:8px" onclick="reorder(${o.id})">Nochmal bestellen</button></div>`).join('')
     : '<div class="msg info">Noch keine Bestellungen.</div>');
   window._mine = data;
@@ -437,7 +470,7 @@ async function adminOrders() {
         ${['neu', 'bearbeitet', 'geliefert', 'storniert'].map(s => `<option ${s === o.status ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
       <div class="muted">Nr. ${o.id} · ${fmtTime(o.created_at)} · ☎ ${h(o.profiles?.phone)}<br>${h(o.profiles?.address)}</div>
       <table>${o.order_items.map(i => `<tr><td>${h(i.product_name)}</td><td class="r"><b>${fmtQ(i.quantity)}</b> ${h(i.unit)}</td></tr>`).join('')}</table>
-      ${o.note ? `<div class="msg info">Hinweis: ${h(o.note)}</div>` : ''}</div>`).join('') || '<div class="msg info">Keine Bestellungen für dieses Datum.</div>');
+      ${o.note ? `<div class="msg info" style="white-space:pre-line">Hinweis: ${h(o.note)}</div>` : ''}</div>`).join('') || '<div class="msg info">Keine Bestellungen für dieses Datum.</div>');
 }
 async function setStatus(id, s) {
   const { error } = await sb.from('orders').update({ status: s }).eq('id', id);
