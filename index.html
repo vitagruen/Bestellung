@@ -355,6 +355,15 @@ function saveNote(id) {
   if (v) notes[id] = v; else delete notes[id];
   openNote = null; saveCart(); drawList();
 }
+function drawChips() {
+  const cats = [...new Set(products.map(p => p.category || 'Sonstiges'))];
+  if (catSel && !cats.includes(catSel)) catSel = '';
+  if (cats.length < 2) { $('#chips').innerHTML = ''; return; }
+  window._cats = cats;
+  const b = (i, label, ic, on) => `<button class="${on ? 'on' : ''}" onclick="catSel=${i < 0 ? "''" : '_cats[' + i + ']'};drawChips();drawList()">${ic}${h(label)}</button>`;
+  $('#chips').innerHTML = b(-1, 'Alle', icon({ name: 'kiste' }, 28), !catSel) +
+    cats.map((c, i) => b(i, c, icon(products.find(p => (p.category || 'Sonstiges') === c), 28), catSel === c)).join('');
+}
 function drawList() {
   const s = search.trim().toLowerCase();
   const items = products.filter(p => (!catSel || (p.category || 'Sonstiges') === catSel) && (!s || p.name.toLowerCase().includes(s) || (p.category || '').toLowerCase().includes(s)));
